@@ -47,6 +47,23 @@ class MistralOCRService:
             DocumentStructure with extracted content
         """
         try:
+            # For text files, create a simple structure without OCR
+            if document_type in ['txt', 'text']:
+                if isinstance(document, bytes):
+                    text_content = document.decode('utf-8')
+                else:
+                    text_content = document
+
+                return DocumentStructure(
+                    raw_text=text_content,
+                    pages=[{"index": 0, "markdown": text_content, "images": [], "dimensions": {}}],
+                    tables=[],
+                    forms={},
+                    metadata={"document_type": "text", "language": "de"},
+                    model="text-passthrough",
+                    usage_info={"pages_processed": 1, "doc_size_bytes": len(text_content)}
+                )
+
             # Prepare document for processing
             if isinstance(document, bytes):
                 document_b64 = base64.b64encode(document).decode('utf-8')

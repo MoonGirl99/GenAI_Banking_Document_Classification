@@ -1,0 +1,12 @@
+pandas
+langchain
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+mistralai
+chromadb
+httpx
+python-multipart
+python-dotenv
+numpy

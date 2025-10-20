@@ -1,7 +1,7 @@
 from mistralai import Mistral
 import json
 from app.config import settings
-from app.models.document import DocumentCategory, UrgencyLevel, ProcessedDocument
+from app.models.document import DocumentCategory, UrgencyLevel, ProcessedDocument, DocumentMetadata
 
 
 class LLMService:
@@ -15,7 +15,7 @@ class LLMService:
         prompt = self._create_classification_prompt(text)
 
         try:
-            response = await self.client.chat.complete(
+            response = self.client.chat.complete(
                 model=settings.MISTRAL_MODEL,
                 messages=[
                     {
@@ -39,7 +39,7 @@ class LLMService:
                 raw_text=text,
                 category=DocumentCategory(result["category"]),
                 urgency_level=UrgencyLevel(result["urgency"]),
-                metadata=result["metadata"],
+                metadata=DocumentMetadata(**result["metadata"]),
                 extracted_info=result["extracted_info"],
                 confidence_score=result["confidence_score"],
                 assigned_department=self._get_department(result["category"]),
@@ -84,14 +84,14 @@ class LLMService:
                 "mentioned_amounts": "string or null",
                 "reference_numbers": ["list of strings"]
             },
-            "confidence_score": float
+            "confidence_score": 0.95
         }"""
 
     def _create_classification_prompt(self, text: str) -> str:
         return f"""Analyze this banking document and classify it according to the instructions:
 
         DOCUMENT TEXT:
-        {text[:3000]}  # Limit to avoid token limits
+        {text[:3000]}
 
         Provide the structured JSON response."""
 
