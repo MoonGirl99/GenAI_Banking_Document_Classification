@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Document Classification System</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏦 Bank Document Classification System</h1>
+            <p class="subtitle">AI-powered document processing using Mistral AI</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Upload Section -->
+            <section class="upload-section card">
+                <h2>📄 Upload Document</h2>
+                <div class="upload-area" id="uploadArea">
+                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p class="upload-text">Drag & drop your document here or click to browse</p>
+                    <p class="upload-hint">Supports: PDF, JPG, PNG, TXT</p>
+                    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.txt" hidden>
+                </div>
+                <button id="uploadBtn" class="btn btn-primary" disabled>
+                    <span class="btn-text">Process Document</span>
+                    <span class="spinner" hidden></span>
+                </button>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section card" id="resultsSection" hidden>
+                <h2>📊 Processing Results</h2>
+                <div class="result-grid">
+                    <div class="result-item">
+                        <span class="result-label">Document ID</span>
+                        <span class="result-value" id="docId">-</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Category</span>
+                        <span class="result-value badge" id="category">-</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Urgency</span>
+                        <span class="result-value badge" id="urgency">-</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Department</span>
+                        <span class="result-value" id="department">-</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Confidence Score</span>
+                        <span class="result-value" id="confidence">-</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Immediate Action Required</span>
+                        <span class="result-value" id="immediate">-</span>
+                    </div>
+                </div>
+
+                <div class="metadata-section">
+                    <h3>👤 Customer Information</h3>
+                    <div class="metadata-grid" id="customerInfo"></div>
+                </div>
+
+                <div class="extracted-section">
+                    <h3>📋 Extracted Information</h3>
+                    <div class="extracted-content" id="extractedInfo"></div>
+                </div>
+            </section>
+
+            <!-- Search Section -->
+            <section class="search-section card">
+                <h2>🔍 Search Documents</h2>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search for similar documents..." />
+                    <button id="searchBtn" class="btn btn-secondary">Search</button>
+                </div>
+                <div id="searchResults" class="search-results"></div>
+            </section>
+
+            <!-- Recent Documents -->
+            <section class="recent-section card">
+                <h2>📚 Recent Documents</h2>
+                <div id="recentDocs" class="document-list">
+                    <p class="empty-state">No documents processed yet</p>
+                </div>
+            </section>
+        </div>
+
+        <footer>
+            <p>Powered by Mistral AI • <a href="/docs" target="_blank">API Documentation</a></p>
+        </footer>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+

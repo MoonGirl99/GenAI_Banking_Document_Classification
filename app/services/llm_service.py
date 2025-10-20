@@ -84,7 +84,7 @@ class LLMService:
                 "mentioned_amounts": "string or null",
                 "reference_numbers": ["list of strings"]
             },
-            "confidence_score": 0.95
+            "confidence_score": float
         }"""
 
     def _create_classification_prompt(self, text: str) -> str:

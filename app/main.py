@@ -1,7 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from typing import List, Optional
 import uuid
+import os
 from app.services.ocr_service import MistralOCRService
 from app.services.llm_service import LLMService
 from app.services.embedding_service import EmbeddingService
@@ -15,6 +17,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Mount static files
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 # Initialize services
 ocr_service = MistralOCRService()
 llm_service = LLMService()
@@ -24,8 +30,14 @@ db_client = ChromaDBClient()
 
 
 @app.get("/")
-async def root():
-    """Health check endpoint"""
+async def home():
+    """Serve the web UI"""
+    return FileResponse(os.path.join(static_dir, "index.html"))
+
+
+@app.get("/api/health")
+async def health_check():
+    """API health check endpoint"""
     return {"status": "healthy", "service": "Bank Document Classification System"}
 
 
@@ -153,3 +165,4 @@ async def get_document(document_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
