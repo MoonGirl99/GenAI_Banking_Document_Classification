@@ -2,19 +2,17 @@ pandas
 langchain
 fastapi
 uvicorn
-pydantic
+pydantic>=2.10.3
 pydantic-settings
-mistralai
+mistralai>=1.0.0
 chromadb
-httpx
+httpx>=0.28.1
 python-multipart
 python-dotenv
-numpy
+numpy<2.0.0
 
-# Testing dependencies
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
 pytest-mock==3.12.0
-httpx==0.25.2
 faker==20.1.0
