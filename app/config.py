@@ -5,7 +5,7 @@ from typing import Dict
 class Settings(BaseSettings):
     # Mistral AI Configuration
     MISTRAL_API_KEY: str
-    MISTRAL_MODEL: str = "mistral-large-latest"
+    MISTRAL_MODEL: str = "mistral-small-latest"
     MISTRAL_EMBEDDING_MODEL: str = "mistral-embed"
     MISTRAL_OCR_MODEL: str = "mistral-ocr-latest"
 

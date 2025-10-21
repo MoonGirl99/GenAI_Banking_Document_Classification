@@ -4,19 +4,21 @@ const API_BASE = '';
 // State
 let currentFile = null;
 let recentDocuments = [];
+let mainChatHistory = [];
 
 // DOM Elements
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 const uploadBtn = document.getElementById('uploadBtn');
 const resultsSection = document.getElementById('resultsSection');
-const searchInput = document.getElementById('searchInput');
-const searchBtn = document.getElementById('searchBtn');
+const chatInputMain = document.getElementById('chatInputMain');
+const chatBtnMain = document.getElementById('chatBtnMain');
+const chatMessagesMain = document.getElementById('chatMessagesMain');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initializeEventListeners();
-    loadRecentDocuments();
+    loadDocumentsByCategory();
 });
 
 function initializeEventListeners() {
@@ -48,11 +50,15 @@ function initializeEventListeners() {
     // Upload button
     uploadBtn.addEventListener('click', handleUpload);
 
-    // Search
-    searchBtn.addEventListener('click', handleSearch);
-    searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleSearch();
-    });
+    // Chat
+    if (chatBtnMain) {
+        chatBtnMain.addEventListener('click', handleChat);
+    }
+    if (chatInputMain) {
+        chatInputMain.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleChat();
+        });
+    }
 }
 
 function handleFileSelect(e) {
@@ -123,6 +129,9 @@ async function handleUpload() {
         saveToRecent(result);
         showToast('Document processed successfully!', 'success');
 
+        // Reload documents by category
+        loadDocumentsByCategory();
+
         // Reset upload area
         setTimeout(() => {
             resetUploadArea();
@@ -159,6 +168,13 @@ function displayResults(result) {
     document.getElementById('confidence').textContent = `${(result.confidence_score * 100).toFixed(1)}%`;
     document.getElementById('immediate').textContent = result.requires_immediate_attention ? '⚠️ Yes' : '✓ No';
 
+    // Display alerts for missing data
+    if (result.alerts && result.alerts.length > 0) {
+        result.alerts.forEach(alert => {
+            showToast(alert, 'warning');
+        });
+    }
+
     // Customer information
     const customerInfo = document.getElementById('customerInfo');
     customerInfo.innerHTML = '';
@@ -169,6 +185,13 @@ function displayResults(result) {
                     <div class="metadata-item">
                         <strong>${formatLabel(key)}</strong>
                         <span>${value}</span>
+                    </div>
+                `;
+            } else {
+                customerInfo.innerHTML += `
+                    <div class="metadata-item missing">
+                        <strong>${formatLabel(key)}</strong>
+                        <span class="missing-value">⚠️ Not found</span>
                     </div>
                 `;
             }
@@ -317,6 +340,160 @@ function showToast(message, type = 'info') {
         toast.style.animation = 'slideIn 0.3s ease reverse';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// Chat handler
+async function handleChat() {
+    const query = chatInputMain.value.trim();
+    if (!query) return;
+
+    // Add user message to chat
+    addChatMessage('user', query);
+
+    // Clear input
+    chatInputMain.value = '';
+
+    // Disable button while processing
+    const btnText = chatBtnMain.querySelector('.btn-text');
+    const spinner = chatBtnMain.querySelector('.spinner');
+    chatBtnMain.disabled = true;
+    chatInputMain.disabled = true;
+    btnText.textContent = 'Thinking...';
+    spinner.hidden = false;
+
+    try {
+        const response = await fetch(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                query: query,
+                chat_history: mainChatHistory
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Chat request failed');
+        }
+
+        const data = await response.json();
+        addChatMessage('assistant', data.response);
+
+        // Update chat history
+        mainChatHistory.push({ role: 'user', content: query });
+        mainChatHistory.push({ role: 'assistant', content: data.response });
+
+    } catch (error) {
+        console.error('Chat error:', error);
+        showToast(`Chat error: ${error.message}`, 'error');
+        addChatMessage('assistant', 'Sorry, I encountered an error. Please try again.');
+    } finally {
+        // Re-enable input
+        chatBtnMain.disabled = false;
+        chatInputMain.disabled = false;
+        btnText.textContent = 'Send';
+        spinner.hidden = true;
+        chatInputMain.focus();
+    }
+}
+
+function addChatMessage(role, content) {
+    const messageElement = document.createElement('div');
+    messageElement.className = `chat-message ${role}`;
+    messageElement.innerHTML = `
+        <div class="chat-message-content">
+            ${formatMessageContent(content)}
+        </div>
+    `;
+    chatMessagesMain.appendChild(messageElement);
+
+    // Scroll to bottom
+    chatMessagesMain.scrollTop = chatMessagesMain.scrollHeight;
+}
+
+function formatMessageContent(content) {
+    // Simple markdown-like formatting
+    return content
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+}
+
+// Load documents by category
+async function loadDocumentsByCategory() {
+    const categoriesView = document.getElementById('categoriesView');
+
+    try {
+        const response = await fetch(`${API_BASE}/documents-by-category`);
+
+        if (!response.ok) {
+            throw new Error('Failed to load documents');
+        }
+
+        const data = await response.json();
+        displayDocumentsByCategory(data.categories);
+
+    } catch (error) {
+        console.error('Load error:', error);
+        categoriesView.innerHTML = '<p class="empty-state">Failed to load documents</p>';
+    }
+}
+
+function displayDocumentsByCategory(categories) {
+    const categoriesView = document.getElementById('categoriesView');
+
+    if (!categories || Object.keys(categories).length === 0) {
+        categoriesView.innerHTML = '<p class="empty-state">No documents processed yet</p>';
+        return;
+    }
+
+    const categoryIcons = {
+        'loan_applications': '💳',
+        'account_inquiries': '💰',
+        'complaints': '⚠️',
+        'kyc_updates': '🔐',
+        'general_correspondence': '📧'
+    };
+
+    let html = '';
+
+    Object.entries(categories).forEach(([category, documents]) => {
+        const icon = categoryIcons[category] || '📄';
+        html += `
+            <div class="category-group">
+                <div class="category-header">
+                    <h3>${icon} ${formatCategory(category)}</h3>
+                    <span class="category-count">${documents.length}</span>
+                </div>
+                <div class="category-documents">
+                    ${documents.map(doc => `
+                        <div class="document-card" onclick="viewDocument('${doc.document_id}')">
+                            <div class="document-card-header">
+                                <span class="document-filename">📄 ${doc.filename || 'Unknown'}</span>
+                                <span class="badge ${doc.urgency}">${doc.urgency || 'N/A'}</span>
+                            </div>
+                            <div class="document-card-meta">
+                                ${doc.customer_id ? `<span>Customer: ${doc.customer_id}</span>` : ''}
+                                <span>${formatDate(doc.processed_at)}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    });
+
+    categoriesView.innerHTML = html;
+}
+
+function viewDocument(documentId) {
+    window.location.href = `/static/document-detail.html?id=${documentId}`;
+}
+
+function formatDate(dateString) {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 }
 
 // Utility functions

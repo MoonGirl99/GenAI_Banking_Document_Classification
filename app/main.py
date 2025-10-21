@@ -71,17 +71,36 @@ async def process_document(
         processed_doc.embedding = embedding
 
         # Step 6: Store in vector database
+        # Filter out None values from metadata to avoid ChromaDB deserialization errors
+        metadata = {
+            "category": processed_doc.category.value,
+            "urgency": processed_doc.urgency_level.value,
+            "processed_at": processed_doc.processed_at.isoformat(),
+            "filename": file.filename
+        }
+
+        # Add optional fields only if they exist
+        if processed_doc.metadata.customer_id:
+            metadata["customer_id"] = processed_doc.metadata.customer_id
+        else:
+            metadata["customer_id_missing"] = "true"  # Flag for missing customer ID
+
+        if processed_doc.metadata.account_number:
+            metadata["account_number"] = processed_doc.metadata.account_number
+        else:
+            metadata["account_number_missing"] = "true"  # Flag for missing account number
+
+        if processed_doc.metadata.email:
+            metadata["email"] = processed_doc.metadata.email
+
+        if processed_doc.metadata.phone:
+            metadata["phone"] = processed_doc.metadata.phone
+
         db_client.store_document(
             document_id=processed_doc.id,
             text=text_content,
             embedding=embedding,
-            metadata={
-                "category": processed_doc.category.value,
-                "urgency": processed_doc.urgency_level.value,
-                "customer_id": processed_doc.metadata.customer_id,
-                "processed_at": processed_doc.processed_at.isoformat(),
-                "filename": file.filename
-            }
+            metadata=metadata
         )
 
         # Step 7: Route document (in background)
@@ -89,6 +108,15 @@ async def process_document(
             routing_service.route_document,
             processed_doc
         )
+
+        # Create alerts for missing critical data
+        alerts = []
+        if not processed_doc.metadata.customer_id:
+            alerts.append("Customer ID is missing from this document")
+        if not processed_doc.metadata.account_number:
+            alerts.append("Account number is missing from this document")
+        if not processed_doc.metadata.email and not processed_doc.metadata.phone:
+            alerts.append("No contact information (email or phone) found in this document")
 
         return JSONResponse(
             status_code=200,
@@ -103,7 +131,8 @@ async def process_document(
                 "metadata": {
                     "customer_id": processed_doc.metadata.customer_id,
                     "account_number": processed_doc.metadata.account_number
-                }
+                },
+                "alerts": alerts if alerts else None
             }
         )
 
@@ -305,6 +334,116 @@ def vector_stats(sample: int = 50):
             "norm_avg": round(sum(norms) / len(norms), 6),
             "norm_max": round(max(norms), 6),
         }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/documents-by-category")
+def get_documents_by_category():
+    """
+    Get all documents grouped by category
+    """
+    try:
+        # Get all documents from ChromaDB
+        results = db_client.collection.get(
+            include=["metadatas", "documents"]
+        )
+
+        # Group by category
+        documents_by_category = {}
+        for i, doc_id in enumerate(results["ids"]):
+            metadata = results["metadatas"][i]
+            category = metadata.get("category", "general_correspondence")
+
+            if category not in documents_by_category:
+                documents_by_category[category] = []
+
+            documents_by_category[category].append({
+                "document_id": doc_id,
+                "filename": metadata.get("filename", "Unknown"),
+                "customer_id": metadata.get("customer_id"),
+                "urgency": metadata.get("urgency"),
+                "processed_at": metadata.get("processed_at")
+            })
+
+        return JSONResponse(
+            status_code=200,
+            content={"categories": documents_by_category}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat")
+async def chat_with_document(request: dict):
+    """
+    Chat with LLM about documents - searches database for relevant context
+    """
+    try:
+        query = request.get("query")
+        document_id = request.get("document_id")
+        chat_history = request.get("chat_history", [])
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+
+        # Get document context if document_id provided
+        context = ""
+        if document_id:
+            doc = db_client.get_document_by_id(document_id)
+            if doc:
+                context = f"Document Context:\n{doc['document']}\n\nMetadata: {doc['metadata']}\n\n"
+        else:
+            # Search for relevant documents using semantic search
+            try:
+                query_embedding = embedding_service.generate_embedding(query)
+                search_results = db_client.search_similar_documents(
+                    query_embedding=query_embedding,
+                    n_results=3  # Get top 3 relevant documents
+                )
+
+                if search_results["ids"]:
+                    context = "Relevant Documents from Database:\n\n"
+                    for i in range(len(search_results["ids"])):
+                        doc_id = search_results["ids"][i]
+                        doc_text = search_results["documents"][i]
+                        doc_meta = search_results["metadatas"][i]
+                        similarity = 1 - search_results["distances"][i]
+
+                        context += f"Document {i+1} (ID: {doc_id}, Similarity: {similarity:.2f}):\n"
+                        context += f"Category: {doc_meta.get('category', 'N/A')}\n"
+                        context += f"Urgency: {doc_meta.get('urgency', 'N/A')}\n"
+                        context += f"Filename: {doc_meta.get('filename', 'N/A')}\n"
+                        context += f"Content Preview: {doc_text[:500]}...\n\n"
+
+                    # Get all documents if query is about listing/viewing all
+                    if any(keyword in query.lower() for keyword in ['all', 'list', 'show me', 'find all', 'get all']):
+                        all_docs = db_client.collection.get(include=["metadatas", "documents"])
+                        context += f"\n\nTotal Documents in Database: {len(all_docs['ids'])}\n"
+
+                        # Group by category for summary
+                        category_counts = {}
+                        for meta in all_docs["metadatas"]:
+                            cat = meta.get("category", "unknown")
+                            category_counts[cat] = category_counts.get(cat, 0) + 1
+
+                        context += "Documents by Category:\n"
+                        for cat, count in category_counts.items():
+                            context += f"- {cat}: {count} document(s)\n"
+
+            except Exception as e:
+                print(f"Search error: {e}")
+                # Continue without search results
+                context = "Note: Unable to search database at this moment, providing general assistance.\n\n"
+
+        # Use LLM service to generate response
+        response = await llm_service.chat_with_context(query, context, chat_history)
+
+        return JSONResponse(
+            status_code=200,
+            content={"response": response}
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

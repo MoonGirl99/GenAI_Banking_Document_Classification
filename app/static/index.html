@@ -72,20 +72,31 @@
                 </div>
             </section>
 
-            <!-- Search Section -->
+            <!-- Chatbot Section -->
             <section class="search-section card">
-                <h2>🔍 Search Documents</h2>
-                <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="Search for similar documents..." />
-                    <button id="searchBtn" class="btn btn-secondary">Search</button>
+                <h2>💬 Chat with AI Assistant</h2>
+                <div class="chat-container-main">
+                    <div id="chatMessagesMain" class="chat-messages-main">
+                        <div class="message assistant">
+                            <div class="message-content">
+                                Hello! I'm your AI assistant. I can help you with questions about document classification, banking procedures, or general queries. How can I assist you today?
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-box">
+                        <input type="text" id="chatInputMain" placeholder="Ask me anything about documents or banking..." />
+                        <button id="chatBtnMain" class="btn btn-secondary">
+                            <span class="btn-text">Send</span>
+                            <span class="spinner" hidden></span>
+                        </button>
+                    </div>
                 </div>
-                <div id="searchResults" class="search-results"></div>
             </section>
 
             <!-- Recent Documents -->
             <section class="recent-section card">
-                <h2>📚 Recent Documents</h2>
-                <div id="recentDocs" class="document-list">
+                <h2>📚 Documents by Category</h2>
+                <div id="categoriesView" class="categories-container">
                     <p class="empty-state">No documents processed yet</p>
                 </div>
             </section>
@@ -102,4 +113,3 @@
     <script src="/static/app.js"></script>
 </body>
 </html>
-

@@ -107,3 +107,54 @@ class LLMService:
 
     def _get_department(self, category: str) -> str:
         return settings.DEPARTMENT_EMAILS.get(category, "info@bank.de")
+
+    async def chat_with_context(self, query: str, context: str = "", chat_history: list = None) -> str:
+        """
+        Chat with LLM using document context and chat history
+        """
+        if chat_history is None:
+            chat_history = []
+
+        # Build messages with context
+        messages = [
+            {
+                "role": "system",
+                "content": """You are a helpful AI assistant for a German banking document classification system. 
+                You can answer questions about documents, their content, classifications, and banking procedures.
+                If document context is provided, use it to answer questions accurately.
+                Be concise and professional in your responses."""
+            }
+        ]
+
+        # Add context if provided
+        if context:
+            messages.append({
+                "role": "system",
+                "content": f"Here is the document context you should reference:\n\n{context}"
+            })
+
+        # Add chat history
+        for msg in chat_history:
+            messages.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
+
+        # Add current query
+        messages.append({
+            "role": "user",
+            "content": query
+        })
+
+        try:
+            response = self.client.chat.complete(
+                model=settings.MISTRAL_MODEL,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1000
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            raise Exception(f"Chat failed: {str(e)}")
