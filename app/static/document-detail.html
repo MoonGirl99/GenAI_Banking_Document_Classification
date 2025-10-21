@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Details - Bank Document Classification System</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/document-detail.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-nav">
+                <a href="/" class="back-btn">← Back to Home</a>
+                <h1>📄 Document Details</h1>
+            </div>
+        </header>
+
+        <div class="detail-layout">
+            <!-- Document Information Panel -->
+            <aside class="document-panel card">
+                <h2>Document Information</h2>
+                <div id="documentInfo" class="document-info-content">
+                    <p class="loading">Loading document...</p>
+                </div>
+            </aside>
+
+            <!-- Chatbot Panel -->
+            <main class="chat-panel card">
+                <h2>💬 Chat with AI Assistant</h2>
+                <div class="chat-container">
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="message assistant">
+                            <div class="message-content">
+                                Hello! I'm your AI assistant. I can help you understand this document better. Feel free to ask me any questions about its content, classification, or related banking procedures.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chatInput" placeholder="Ask me anything about this document..." />
+                        <button id="sendBtn" class="btn btn-primary">
+                            <span class="btn-text">Send</span>
+                            <span class="spinner" hidden></span>
+                        </button>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <footer>
+            <p>Powered by Mistral AI • <a href="/docs" target="_blank">API Documentation</a></p>
+        </footer>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="/static/document-detail.js"></script>
+</body>
+</html>
+
