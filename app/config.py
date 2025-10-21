@@ -5,9 +5,9 @@ from typing import Dict
 class Settings(BaseSettings):
     # Mistral AI Configuration
     MISTRAL_API_KEY: str
-    MISTRAL_MODEL: str = "ministral-8b-2410"
+    MISTRAL_MODEL: str = "mistral-medium-2508"
     MISTRAL_EMBEDDING_MODEL: str = "mistral-embed"
-    MISTRAL_OCR_MODEL: str = "mistral-ocr-latest"
+    MISTRAL_OCR_MODEL: str = "mistral-ocr-2505"
 
     # ChromaDB Configuration
     CHROMA_HOST: str = "localhost"

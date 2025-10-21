@@ -25,7 +25,7 @@ class MistralOCRService:
 
     def __init__(self):
         self.client = Mistral(api_key=settings.MISTRAL_API_KEY)
-        self.model = "mistral-ocr-latest"
+        self.model = "mistral-ocr-2505"
 
     def process_document(
             self,
