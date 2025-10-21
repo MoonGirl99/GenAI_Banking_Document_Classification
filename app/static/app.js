@@ -3,12 +3,16 @@ const API_BASE = '';
 
 // State
 let currentFile = null;
+let currentTextInput = '';
+let activeTab = 'file-tab';
 let recentDocuments = [];
 let mainChatHistory = [];
 
 // DOM Elements
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
+const textInput = document.getElementById('textInput');
+const charCount = document.getElementById('charCount');
 const uploadBtn = document.getElementById('uploadBtn');
 const resultsSection = document.getElementById('resultsSection');
 const chatInputMain = document.getElementById('chatInputMain');
@@ -24,11 +28,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeEventListeners() {
+    // Tab switching
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
     // Upload area click
     uploadArea.addEventListener('click', () => fileInput.click());
 
     // File input change
     fileInput.addEventListener('change', handleFileSelect);
+
+    // Text input change
+    if (textInput) {
+        textInput.addEventListener('input', handleTextInput);
+    }
 
     // Drag and drop
     uploadArea.addEventListener('dragover', (e) => {
@@ -61,6 +76,26 @@ function initializeEventListeners() {
             if (e.key === 'Enter') handleChat();
         });
     }
+}
+
+function switchTab(tabId) {
+    // Update active tab
+    activeTab = tabId;
+
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabId);
+    });
+
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.toggle('active', content.id === tabId);
+    });
+
+    // Reset and check if we can enable the upload button
+    currentFile = null;
+    currentTextInput = '';
+    checkUploadButton();
 }
 
 function handleFileSelect(e) {
@@ -101,9 +136,27 @@ function handleFile(file) {
     `;
 }
 
-async function handleUpload() {
-    if (!currentFile) return;
+function handleTextInput(e) {
+    const text = e.target.value;
+    currentTextInput = text;
 
+    // Update character count
+    if (charCount) {
+        charCount.textContent = text.length;
+    }
+
+    checkUploadButton();
+}
+
+function checkUploadButton() {
+    if (activeTab === 'file-tab') {
+        uploadBtn.disabled = !currentFile;
+    } else if (activeTab === 'text-tab') {
+        uploadBtn.disabled = !currentTextInput.trim();
+    }
+}
+
+async function handleUpload() {
     // Update button state
     const btnText = uploadBtn.querySelector('.btn-text');
     const spinner = uploadBtn.querySelector('.spinner');
@@ -111,15 +164,33 @@ async function handleUpload() {
     btnText.textContent = 'Processing...';
     spinner.hidden = false;
 
-    // Create form data
-    const formData = new FormData();
-    formData.append('file', currentFile);
-
     try {
-        const response = await fetch(`${API_BASE}/process-document`, {
-            method: 'POST',
-            body: formData
-        });
+        let response;
+
+        if (activeTab === 'file-tab' && currentFile) {
+            // Process file upload
+            const formData = new FormData();
+            formData.append('file', currentFile);
+
+            response = await fetch(`${API_BASE}/process-document`, {
+                method: 'POST',
+                body: formData
+            });
+        } else if (activeTab === 'text-tab' && currentTextInput.trim()) {
+            // Process text input
+            response = await fetch(`${API_BASE}/process-text`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: currentTextInput.trim(),
+                    filename: 'pasted_text.txt'
+                })
+            });
+        } else {
+            throw new Error('No input provided');
+        }
 
         if (!response.ok) {
             const error = await response.json();
@@ -134,9 +205,13 @@ async function handleUpload() {
         // Reload documents by category
         loadDocumentsByCategory();
 
-        // Reset upload area
+        // Reset input area
         setTimeout(() => {
-            resetUploadArea();
+            if (activeTab === 'file-tab') {
+                resetUploadArea();
+            } else {
+                resetTextArea();
+            }
         }, 1000);
 
     } catch (error) {
@@ -146,7 +221,7 @@ async function handleUpload() {
         // Reset button state
         btnText.textContent = 'Process Document';
         spinner.hidden = true;
-        uploadBtn.disabled = false;
+        checkUploadButton();
     }
 }
 
@@ -344,6 +419,17 @@ function resetUploadArea() {
         <p class="upload-text">Drag & drop your document here or click to browse</p>
         <p class="upload-hint">Supports: PDF, JPG, PNG, TXT</p>
     `;
+}
+
+function resetTextArea() {
+    if (textInput) {
+        textInput.value = '';
+        currentTextInput = '';
+        if (charCount) {
+            charCount.textContent = '0';
+        }
+    }
+    uploadBtn.disabled = true;
 }
 
 function showToast(message, type = 'info') {
@@ -561,8 +647,10 @@ function formatTimestamp(timestamp) {
     const days = Math.floor(diff / 86400000);
 
     if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
+    if (minutes === 1) return '1 minute ago';
+    if (hours < 1) return `${minutes} minutes ago`;
+    if (hours === 1) return '1 hour ago';
+    if (days < 1) return `${hours} hours ago`;
+    if (days === 1) return '1 day ago';
+    return `${days} days ago`;
 }

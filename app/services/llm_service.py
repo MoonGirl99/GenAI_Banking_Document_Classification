@@ -3,12 +3,14 @@ from mistralai import Mistral
 import json
 from app.config import settings
 from app.models.document import DocumentCategory, UrgencyLevel, ProcessedDocument, DocumentMetadata
+from langsmith import traceable
 
 
 class LLMService:
     def __init__(self):
         self.client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
+    @traceable(name="classify_document", run_type="llm")
     async def classify_and_extract(self, text: str) -> ProcessedDocument:
         """
         Use Mistral LLM to classify document and extract key information
@@ -108,6 +110,7 @@ class LLMService:
     def _get_department(self, category: str) -> str:
         return settings.DEPARTMENT_EMAILS.get(category, "info@bank.de")
 
+    @traceable(name="chat_with_context", run_type="chain")
     async def chat_with_context(self, query: str, context: str = "", chat_history: list = None) -> str:
         """
         Chat with LLM using document context and chat history

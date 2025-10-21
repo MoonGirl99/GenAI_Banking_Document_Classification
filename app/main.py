@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from typing import List, Optional
+from pydantic import BaseModel
 import uuid
 import os
 from app.config import settings
@@ -30,6 +31,12 @@ routing_service = RoutingService()
 db_client = ChromaDBClient()
 
 
+# Pydantic models for request bodies
+class TextInput(BaseModel):
+    text: str
+    filename: Optional[str] = "pasted_text.txt"
+
+
 @app.get("/")
 def home():
     """Serve the web UI"""
@@ -37,10 +44,12 @@ def home():
 
 
 @app.get("/api/health")
-def health_check():
-    """API health check endpoint"""
-    return {"status": "healthy", "service": "Bank Document Classification System"}
-
+def health():
+    return {
+        "api": "healthy",
+        "chromadb": db_client.collection.count(),  # Check DB connection
+        "mistral": "ok"  # Could add API key validation
+    }
 
 @app.post("/process-document")
 async def process_document(
@@ -104,6 +113,97 @@ async def process_document(
         )
 
         # Step 7: Route document (in background)
+        background_tasks.add_task(
+            routing_service.route_document,
+            processed_doc
+        )
+
+        # Create alerts for missing critical data
+        alerts = []
+        if not processed_doc.metadata.customer_id:
+            alerts.append("Customer ID is missing from this document")
+        if not processed_doc.metadata.account_number:
+            alerts.append("Account number is missing from this document")
+        if not processed_doc.metadata.email and not processed_doc.metadata.phone:
+            alerts.append("No contact information (email or phone) found in this document")
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "document_id": processed_doc.id,
+                "category": processed_doc.category.value,
+                "urgency": processed_doc.urgency_level.value,
+                "department": processed_doc.assigned_department,
+                "requires_immediate_attention": processed_doc.requires_immediate_attention,
+                "confidence_score": processed_doc.confidence_score,
+                "extracted_info": processed_doc.extracted_info,
+                "metadata": {
+                    "customer_id": processed_doc.metadata.customer_id,
+                    "account_number": processed_doc.metadata.account_number
+                },
+                "alerts": alerts if alerts else None
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/process-text")
+async def process_text(
+        text_input: TextInput,
+        background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """
+    Process text directly without file upload (for copy-paste functionality)
+    """
+    try:
+        # Validate text input
+        if not text_input.text or not text_input.text.strip():
+            raise HTTPException(status_code=400, detail="Text content is required")
+
+        text_content = text_input.text.strip()
+
+        # Step 1: Classify and extract information using LLM
+        processed_doc = await llm_service.classify_and_extract(text_content)
+
+        # Step 2: Generate embedding for semantic search
+        embedding = embedding_service.generate_embedding(text_content)
+        processed_doc.embedding = embedding
+
+        # Step 3: Store in vector database
+        metadata = {
+            "category": processed_doc.category.value,
+            "urgency": processed_doc.urgency_level.value,
+            "processed_at": processed_doc.processed_at.isoformat(),
+            "filename": text_input.filename
+        }
+
+        # Add optional fields only if they exist
+        if processed_doc.metadata.customer_id:
+            metadata["customer_id"] = processed_doc.metadata.customer_id
+        else:
+            metadata["customer_id_missing"] = "true"
+
+        if processed_doc.metadata.account_number:
+            metadata["account_number"] = processed_doc.metadata.account_number
+        else:
+            metadata["account_number_missing"] = "true"
+
+        if processed_doc.metadata.email:
+            metadata["email"] = processed_doc.metadata.email
+
+        if processed_doc.metadata.phone:
+            metadata["phone"] = processed_doc.metadata.phone
+
+        db_client.store_document(
+            document_id=processed_doc.id,
+            text=text_content,
+            embedding=embedding,
+            metadata=metadata
+        )
+
+        # Step 4: Route document (in background)
         background_tasks.add_task(
             routing_service.route_document,
             processed_doc

@@ -17,14 +17,33 @@
             <!-- Upload Section -->
             <section class="upload-section card">
                 <h2>📄 Upload Document</h2>
-                <div class="upload-area" id="uploadArea">
-                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <p class="upload-text">Drag & drop your document here or click to browse</p>
-                    <p class="upload-hint">Supports: PDF, JPG, PNG, TXT</p>
-                    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.txt" hidden>
+
+                <!-- Tab Navigation -->
+                <div class="tab-navigation">
+                    <button class="tab-btn active" data-tab="file-tab">📎 Upload File</button>
+                    <button class="tab-btn" data-tab="text-tab">📝 Paste Text</button>
                 </div>
+
+                <!-- File Upload Tab -->
+                <div id="file-tab" class="tab-content active">
+                    <div class="upload-area" id="uploadArea">
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p class="upload-text">Drag & drop your document here or click to browse</p>
+                        <p class="upload-hint">Supports: PDF, JPG, PNG, TXT</p>
+                        <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.txt" hidden>
+                    </div>
+                </div>
+
+                <!-- Text Input Tab -->
+                <div id="text-tab" class="tab-content">
+                    <div class="text-input-area">
+                        <textarea id="textInput" placeholder="Paste your document text here...&#10;&#10;Example:&#10;Dear Sir/Madam,&#10;I would like to apply for a personal loan..."></textarea>
+                        <p class="text-counter"><span id="charCount">0</span> characters</p>
+                    </div>
+                </div>
+
                 <button id="uploadBtn" class="btn btn-primary" disabled>
                     <span class="btn-text">Process Document</span>
                     <span class="spinner" hidden></span>
