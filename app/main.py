@@ -221,3 +221,90 @@ async def debug_storage():
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+# --- Add below your other @app.get routes in main.py ---
+
+@app.get("/api/admin/collection-stats")
+def collection_stats():
+    try:
+        name = db_client.collection.name
+        count = db_client.collection.count()
+        return {"collection": name, "count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/peek")
+def peek(limit: int = 5, offset: int = 0, include_embeddings: bool = False):
+    try:
+        # Only allowed keys here; IDs come back regardless
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.append("embeddings")
+
+        res = db_client.collection.get(limit=limit, offset=offset, include=include)
+
+        n = len(res.get("ids", []))
+        items = []
+        for i in range(n):
+            emb_preview = None
+            if include_embeddings and res.get("embeddings") is not None:
+                raw = res["embeddings"][i]
+                try:
+                    emb_list = raw.tolist() if hasattr(raw, "tolist") else list(raw)
+                    emb_preview = emb_list[:8]  # small preview
+                except Exception:
+                    emb_preview = None
+
+            items.append({
+                "id": res["ids"][i],
+                "doc": (res.get("documents") or [None])[i],
+                "meta": (res.get("metadatas") or [None])[i],
+                "embedding_preview": emb_preview
+            })
+
+        return {"limit": limit, "offset": offset, "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/vector-stats")
+def vector_stats(sample: int = 50):
+    """
+    Inspect sample embeddings for dimension consistency and vector norms.
+    Fully safe against NumPy truth-value ambiguity.
+    """
+    try:
+        import numpy as np
+        res = db_client.collection.get(limit=sample, include=["embeddings"])
+        raw_embs = res.get("embeddings", [])
+
+        valid_embs = []
+        for e in raw_embs:
+            if e is None:
+                continue
+            # Handle numpy arrays, lists, or nested structures robustly
+            try:
+                arr = np.array(e, dtype=np.float32)
+                # Explicit check: ensure the array has *any* finite elements
+                if np.any(np.isfinite(arr)) and arr.size > 0:
+                    valid_embs.append(arr)
+            except Exception:
+                continue
+
+        if len(valid_embs) == 0:
+            raise HTTPException(status_code=400, detail="No valid embeddings found.")
+
+        dims = [emb.shape[0] for emb in valid_embs]
+        norms = [float(np.linalg.norm(emb)) for emb in valid_embs if np.any(emb)]
+
+        return {
+            "sample": len(valid_embs),
+            "dim_unique": sorted(list(set(dims))),
+            "dim_all_equal": (len(set(dims)) == 1),
+            "norm_min": round(min(norms), 6),
+            "norm_avg": round(sum(norms) / len(norms), 6),
+            "norm_max": round(max(norms), 6),
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
