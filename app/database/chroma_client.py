@@ -7,15 +7,32 @@ from app.config import settings
 
 class ChromaDBClient:
     def __init__(self):
-        self.client = chromadb.HttpClient(
-            host=settings.CHROMA_HOST,
-            port=settings.CHROMA_PORT,
-            settings=ChromaSettings(anonymized_telemetry=False)
-        )
-        self.collection = self._get_or_create_collection()
+        # Add retry logic and better error handling
+        import time
+        max_retries = 5
+        for i in range(max_retries):
+            try:
+                self.client = chromadb.HttpClient(
+                    host=settings.CHROMA_HOST,
+                    port=settings.CHROMA_PORT,
+                    settings=ChromaSettings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
+                )
+                self.collection = self._get_or_create_collection()
+                print(f"✅ Connected to ChromaDB at {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
+                break
+            except Exception as e:
+                if i < max_retries - 1:
+                    print(f"⏳ Waiting for ChromaDB... (attempt {i+1}/{max_retries})")
+                    time.sleep(2)
+                else:
+                    raise Exception(f"Failed to connect to ChromaDB after {max_retries} attempts: {e}")
+
 
     def _get_or_create_collection(self):
-        """Get or create the documents collection"""
+        """Get or create a documents collection"""
         try:
             return self.client.get_collection(settings.CHROMA_COLLECTION_NAME)
         except:
@@ -24,7 +41,7 @@ class ChromaDBClient:
                 metadata={"description": "Bank documents collection"}
             )
 
-    async def store_document(
+    def store_document(
             self,
             document_id: str,
             text: str,
@@ -39,7 +56,7 @@ class ChromaDBClient:
             metadatas=[metadata]
         )
 
-    async def search_similar_documents(
+    def search_similar_documents(
             self,
             query_embedding: List[float],
             n_results: int = 5,
@@ -59,7 +76,7 @@ class ChromaDBClient:
             "distances": results["distances"][0]
         }
 
-    async def get_document_by_id(self, document_id: str) -> Optional[Dict]:
+    def get_document_by_id(self, document_id: str) -> Optional[Dict]:
         """Retrieve specific document by ID"""
         results = self.collection.get(
             ids=[document_id],

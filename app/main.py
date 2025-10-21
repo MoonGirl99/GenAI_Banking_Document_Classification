@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from typing import List, Optional
 import uuid
 import os
+from app.config import settings
 from app.services.ocr_service import MistralOCRService
 from app.services.llm_service import LLMService
 from app.services.embedding_service import EmbeddingService
@@ -30,13 +31,13 @@ db_client = ChromaDBClient()
 
 
 @app.get("/")
-async def home():
+def home():
     """Serve the web UI"""
     return FileResponse(os.path.join(static_dir, "index.html"))
 
 
 @app.get("/api/health")
-async def health_check():
+def health_check():
     """API health check endpoint"""
     return {"status": "healthy", "service": "Bank Document Classification System"}
 
@@ -54,7 +55,7 @@ async def process_document(
         content = await file.read()
 
         # Step 2: Process with Mistral OCR for text extraction
-        document_structure = await ocr_service.process_document(
+        document_structure = ocr_service.process_document(
             document=content,
             document_type=file.filename.split('.')[-1].lower()
         )
@@ -63,14 +64,14 @@ async def process_document(
         text_content = document_structure.raw_text
 
         # Step 4: Classify and extract information using LLM
-        processed_doc = await llm_service.classify_and_extract(text_content)
+        processed_doc = await llm_service.classify_and_extract(text_content)  # Add await
 
         # Step 5: Generate embedding for semantic search
         embedding = embedding_service.generate_embedding(text_content)
         processed_doc.embedding = embedding
 
         # Step 6: Store in vector database
-        await db_client.store_document(
+        db_client.store_document(
             document_id=processed_doc.id,
             text=text_content,
             embedding=embedding,
@@ -111,7 +112,7 @@ async def process_document(
 
 
 @app.get("/search-documents")
-async def search_documents(query: str, n_results: int = 5):
+def search_documents(query: str, n_results: int = 5):
     """
     Search for similar documents using semantic search
     """
@@ -120,7 +121,7 @@ async def search_documents(query: str, n_results: int = 5):
         query_embedding = embedding_service.generate_embedding(query)
 
         # Search in ChromaDB
-        results = await db_client.search_similar_documents(
+        results = db_client.search_similar_documents(
             query_embedding=query_embedding,
             n_results=n_results
         )
@@ -146,12 +147,12 @@ async def search_documents(query: str, n_results: int = 5):
 
 
 @app.get("/document/{document_id}")
-async def get_document(document_id: str):
+def get_document(document_id: str):
     """
     Get a specific document by ID
     """
     try:
-        document = await db_client.get_document_by_id(document_id)
+        document = db_client.get_document_by_id(document_id)
 
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -166,3 +167,57 @@ async def get_document(document_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/admin/inspect-embeddings")
+async def inspect_embeddings(limit: int = 10, offset: int = 0):
+    """
+    Retrieve embeddings and metadata for inspection.
+    Args:
+        limit: Number of documents to return.
+        offset: Pagination offset.
+    Returns:
+        List of documents with embeddings and metadata.
+    """
+    try:
+        results = db_client.collection.get(
+            limit=limit,
+            offset=offset,
+            include=["embeddings", "metadatas", "documents"]  # Remove "ids" from here
+        )
+        # Format the response for clarity
+        documents = []
+        for i, (doc_id, embedding, metadata, document) in enumerate(zip(
+            results["ids"],  # ids are always returned
+            results["embeddings"],
+            results.get("metadatas", []),
+            results.get("documents", [])
+        )):
+            documents.append({
+                "id": doc_id,
+                "document": document,
+                "embedding": embedding[:5] if embedding else None,  # Show first 5 dims for brevity
+                "embedding_dim": len(embedding) if embedding else 0,
+                "metadata": metadata,
+            })
+        return {"count": len(results["ids"]), "documents": documents}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/debug-storage")
+async def debug_storage():
+    """Debug what's actually stored"""
+    try:
+        results = db_client.collection.get(
+            limit=1,
+            include=["embeddings", "metadatas", "documents"]
+        )
+
+        return {
+            "ids": results.get("ids", []),
+            "embeddings_key_exists": "embeddings" in results,
+            "embeddings_value": str(type(results.get("embeddings"))),
+            "embeddings_length": len(results.get("embeddings", [])),
+            "raw_result_keys": list(results.keys())
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}

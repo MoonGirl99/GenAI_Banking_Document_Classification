@@ -27,7 +27,7 @@ class MistralOCRService:
         self.client = Mistral(api_key=settings.MISTRAL_API_KEY)
         self.model = "mistral-ocr-latest"
 
-    async def process_document(
+    def process_document(
             self,
             document: Union[bytes, str],
             document_type: str = "pdf",
@@ -86,10 +86,10 @@ class MistralOCRService:
             )
 
             # Parse the response
-            document_structure = await self._parse_ocr_response(ocr_response)
+            document_structure = self._parse_ocr_response(ocr_response)
 
             # Enhance with banking-specific context
-            document_structure = await self._enhance_banking_context(document_structure)
+            document_structure = self._enhance_banking_context(document_structure)
 
             return document_structure
 
@@ -107,7 +107,7 @@ class MistralOCRService:
         }
         return mime_types.get(document_type.lower(), "application/pdf")
 
-    async def _parse_ocr_response(self, response) -> DocumentStructure:
+    def _parse_ocr_response(self, response) -> DocumentStructure:
         """
         Parse the Mistral OCR API response
 
@@ -234,7 +234,7 @@ class MistralOCRService:
 
         return tables
 
-    async def _enhance_banking_context(self, structure: DocumentStructure) -> DocumentStructure:
+    def _enhance_banking_context(self, structure: DocumentStructure) -> DocumentStructure:
         """
         Enhance extraction with banking-specific field recognition
         """

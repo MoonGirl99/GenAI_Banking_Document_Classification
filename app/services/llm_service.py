@@ -1,3 +1,4 @@
+import time
 from mistralai import Mistral
 import json
 from app.config import settings
@@ -13,43 +14,52 @@ class LLMService:
         Use Mistral LLM to classify document and extract key information
         """
         prompt = self._create_classification_prompt(text)
+        max_retries = 3
 
-        try:
-            response = self.client.chat.complete(
-                model=settings.MISTRAL_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": self._get_system_prompt()
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.complete(
+                    model=settings.MISTRAL_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": self._get_system_prompt()
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
 
-            # Parse the JSON response
-            result = json.loads(response.choices[0].message.content)
+                # Parse the JSON response
+                result = json.loads(response.choices[0].message.content)
 
-            # Create ProcessedDocument
-            processed_doc = ProcessedDocument(
-                raw_text=text,
-                category=DocumentCategory(result["category"]),
-                urgency_level=UrgencyLevel(result["urgency"]),
-                metadata=DocumentMetadata(**result["metadata"]),
-                extracted_info=result["extracted_info"],
-                confidence_score=result["confidence_score"],
-                assigned_department=self._get_department(result["category"]),
-                requires_immediate_attention=(result["urgency"] == "high")
-            )
+                # Create ProcessedDocument
+                processed_doc = ProcessedDocument(
+                    raw_text=text,
+                    category=DocumentCategory(result["category"]),
+                    urgency_level=UrgencyLevel(result["urgency"]),
+                    metadata=DocumentMetadata(**result["metadata"]),
+                    extracted_info=result["extracted_info"],
+                    confidence_score=result["confidence_score"],
+                    assigned_department=self._get_department(result["category"]),
+                    requires_immediate_attention=(result["urgency"] == "high")
+                )
 
-            return processed_doc
+                return processed_doc
 
-        except Exception as e:
-            raise Exception(f"LLM classification failed: {str(e)}")
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    wait = 2 ** attempt  # Exponential backoff
+                    print(f"Rate limited, waiting {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise Exception(f"LLM classification failed: {str(e)}")
+        else:
+            raise Exception("LLM classification failed after max retries")
 
     def _get_system_prompt(self) -> str:
         return """You are an AI assistant specialized in processing German banking documents.

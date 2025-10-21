@@ -11,7 +11,7 @@ class RoutingService:
     def __init__(self):
         self.department_mapping = settings.DEPARTMENT_EMAILS
 
-    async def route_document(self, document: ProcessedDocument) -> Dict:
+    def route_document(self, document: ProcessedDocument) -> Dict:
         """
         Route document to appropriate department and create alerts
         """
@@ -24,19 +24,19 @@ class RoutingService:
 
         # Create high priority alert if needed
         if document.requires_immediate_attention:
-            alert = await self._create_priority_alert(document)
+            alert = self._create_priority_alert(document)
             routing_result["alerts_created"].append(alert)
 
         # Send notification to department
-        notification_sent = await self._notify_department(document)
+        notification_sent = self._notify_department(document)
         routing_result["notification_sent"] = notification_sent
 
         # Log routing decision
-        await self._log_routing(document, routing_result)
+        self._log_routing(document, routing_result)
 
         return routing_result
 
-    async def _create_priority_alert(self, document: ProcessedDocument) -> Dict:
+    def _create_priority_alert(self, document: ProcessedDocument) -> Dict:
         """
         Create priority alert for high urgency documents
         """
@@ -53,7 +53,7 @@ class RoutingService:
         # For now, we'll just return the alert structure
         return alert
 
-    async def _notify_department(self, document: ProcessedDocument) -> bool:
+    def _notify_department(self, document: ProcessedDocument) -> bool:
         """
         Send notification to the assigned department
         """
@@ -111,7 +111,7 @@ class RoutingService:
 
         return " | ".join(reasons) if reasons else "Manual review required"
 
-    async def _log_routing(self, document: ProcessedDocument, routing_result: Dict):
+    def _log_routing(self, document: ProcessedDocument, routing_result: Dict):
         """Log routing decision for audit trail"""
         # In production, this would write to audit log
         print(f"Document {document.id} routed to {routing_result['department']}")
