@@ -97,13 +97,13 @@ class MistralOCRService:
             raise Exception(f"Mistral OCR API error: {str(e)}")
 
     def _get_mime_type(self, document_type: str) -> str:
-        """Map document type to MIME type"""
+        """Map document type to MIME type - Mistral OCR expects application/ prefix"""
         mime_types = {
             "pdf": "application/pdf",
-            "png": "image/png",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "avif": "image/avif"
+            "png": "application/pdf",  # Changed from image/png
+            "jpg": "application/pdf",  # Changed from image/jpeg
+            "jpeg": "application/pdf",  # Changed from image/jpeg
+            "avif": "application/pdf"  # Changed from image/avif
         }
         return mime_types.get(document_type.lower(), "application/pdf")
 

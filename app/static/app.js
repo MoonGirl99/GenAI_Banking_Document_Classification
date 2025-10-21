@@ -14,6 +14,8 @@ const resultsSection = document.getElementById('resultsSection');
 const chatInputMain = document.getElementById('chatInputMain');
 const chatBtnMain = document.getElementById('chatBtnMain');
 const chatMessagesMain = document.getElementById('chatMessagesMain');
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -216,13 +218,22 @@ function displayResults(result) {
 }
 
 async function handleSearch() {
+    if (!searchInput) {
+        console.warn('Search input element not found');
+        return;
+    }
+
     const query = searchInput.value.trim();
     if (!query) {
         showToast('Please enter a search query', 'warning');
         return;
     }
 
-    const searchResults = document.getElementById('searchResults');
+    if (!searchResults) {
+        console.warn('Search results element not found');
+        return;
+    }
+
     searchResults.innerHTML = '<p style="text-align: center; color: #64748b;">Searching...</p>';
 
     try {
@@ -243,7 +254,10 @@ async function handleSearch() {
 }
 
 function displaySearchResults(results) {
-    const searchResults = document.getElementById('searchResults');
+    if (!searchResults) {
+        console.warn('Search results element not found');
+        return;
+    }
 
     if (!results || results.length === 0) {
         searchResults.innerHTML = '<p class="empty-state">No results found</p>';
@@ -294,6 +308,11 @@ function loadRecentDocuments() {
 
 function displayRecentDocuments() {
     const recentDocs = document.getElementById('recentDocs');
+
+    if (!recentDocs) {
+        console.warn('Recent documents element not found');
+        return;
+    }
 
     if (recentDocuments.length === 0) {
         recentDocs.innerHTML = '<p class="empty-state">No documents processed yet</p>';
@@ -441,6 +460,11 @@ async function loadDocumentsByCategory() {
 
 function displayDocumentsByCategory(categories) {
     const categoriesView = document.getElementById('categoriesView');
+
+    if (!categoriesView) {
+        console.warn('Categories view element not found');
+        return;
+    }
 
     if (!categories || Object.keys(categories).length === 0) {
         categoriesView.innerHTML = '<p class="empty-state">No documents processed yet</p>';
