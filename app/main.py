@@ -75,6 +75,15 @@ async def process_document(
         # Step 4: Classify and extract information using LLM
         processed_doc = await llm_service.classify_and_extract(text_content)  # Add await
 
+        # Handle gdpr_info as GDPRCompliance object or None
+        gdpr_info = processed_doc.gdpr_info
+        if gdpr_info:
+            gdpr_flags = gdpr_info.flags
+            requires_compliance_review = gdpr_info.requires_human_review
+        else:
+            gdpr_flags = []
+            requires_compliance_review = False
+
         # Step 5: Generate embedding for semantic search
         embedding = embedding_service.generate_embedding(text_content)
         processed_doc.embedding = embedding
@@ -85,7 +94,10 @@ async def process_document(
             "category": processed_doc.category.value,
             "urgency": processed_doc.urgency_level.value,
             "processed_at": processed_doc.processed_at.isoformat(),
-            "filename": file.filename
+            "filename": file.filename,
+            "legal_basis": gdpr_info.legal_basis if gdpr_info else "Unknown",
+            "data_category": gdpr_info.data_category if gdpr_info else "normal",
+            "requires_human_review": requires_compliance_review
         }
 
         # Add optional fields only if they exist
@@ -121,11 +133,14 @@ async def process_document(
         # Create alerts for missing critical data
         alerts = []
         if not processed_doc.metadata.customer_id:
-            alerts.append("Customer ID is missing from this document")
+            alerts.append("Kundennummer fehlt in diesem Dokument")
         if not processed_doc.metadata.account_number:
-            alerts.append("Account number is missing from this document")
+            alerts.append("Kontonummer fehlt in diesem Dokument")
         if not processed_doc.metadata.email and not processed_doc.metadata.phone:
-            alerts.append("No contact information (email or phone) found in this document")
+            alerts.append("Keine Kontaktinformationen (E-Mail oder Telefon) gefunden")
+
+        if requires_compliance_review:
+            alerts.append("🚨 MANUELLE ÜBERPRÜFUNG ERFORDERLICH - Compliance-Team wird benachrichtigt")
 
         return JSONResponse(
             status_code=200,
@@ -140,6 +155,13 @@ async def process_document(
                 "metadata": {
                     "customer_id": processed_doc.metadata.customer_id,
                     "account_number": processed_doc.metadata.account_number
+                },
+                "gdpr_compliance": {
+                    "legal_basis": gdpr_info.legal_basis if gdpr_info else None,
+                    "data_category": gdpr_info.data_category if gdpr_info else None,
+                    "gdpr_rights_invoked": gdpr_info.gdpr_rights_invoked if gdpr_info else [],
+                    "retention_period": gdpr_info.retention_period if gdpr_info else None,
+                    "requires_human_review": requires_compliance_review
                 },
                 "alerts": alerts if alerts else None
             }
@@ -167,6 +189,15 @@ async def process_text(
         # Step 1: Classify and extract information using LLM
         processed_doc = await llm_service.classify_and_extract(text_content)
 
+        # Handle gdpr_info as GDPRCompliance object or None
+        gdpr_info = processed_doc.gdpr_info
+        if gdpr_info:
+            gdpr_flags = gdpr_info.flags
+            requires_compliance_review = gdpr_info.requires_human_review
+        else:
+            gdpr_flags = []
+            requires_compliance_review = False
+
         # Step 2: Generate embedding for semantic search
         embedding = embedding_service.generate_embedding(text_content)
         processed_doc.embedding = embedding
@@ -176,7 +207,10 @@ async def process_text(
             "category": processed_doc.category.value,
             "urgency": processed_doc.urgency_level.value,
             "processed_at": processed_doc.processed_at.isoformat(),
-            "filename": text_input.filename
+            "filename": text_input.filename,
+            "legal_basis": gdpr_info.legal_basis if gdpr_info else "Unknown",
+            "data_category": gdpr_info.data_category if gdpr_info else "normal",
+            "requires_human_review": requires_compliance_review
         }
 
         # Add optional fields only if they exist
@@ -212,11 +246,21 @@ async def process_text(
         # Create alerts for missing critical data
         alerts = []
         if not processed_doc.metadata.customer_id:
-            alerts.append("Customer ID is missing from this document")
+            alerts.append("⚠️ Kundennummer fehlt in diesem Dokument")
         if not processed_doc.metadata.account_number:
-            alerts.append("Account number is missing from this document")
-        if not processed_doc.metadata.email and not processed_doc.metadata.phone:
-            alerts.append("No contact information (email or phone) found in this document")
+            alerts.append("⚠️ Kontonummer fehlt in diesem Dokument")
+
+        if gdpr_flags:
+            for flag in gdpr_flags:
+                if "DATENPANNE" in flag or "DATENSCHUTZVERLETZUNG" in flag:
+                    alerts.append(f"🚨 SICHERHEIT: {flag}")
+                elif "RECHT" in flag:
+                    alerts.append(f"📋 DSGVO: {flag}")
+                elif "EMPFINDLICH" in flag:
+                    alerts.append(f"⚠️ VERTRAULICH: {flag}")
+
+        if requires_compliance_review:
+            alerts.append("🚨 MANUELLE ÜBERPRÜFUNG ERFORDERLICH")
 
         return JSONResponse(
             status_code=200,
@@ -231,6 +275,13 @@ async def process_text(
                 "metadata": {
                     "customer_id": processed_doc.metadata.customer_id,
                     "account_number": processed_doc.metadata.account_number
+                },
+                "gdpr_compliance": {
+                    "legal_basis": gdpr_info.legal_basis if gdpr_info else None,
+                    "data_category": gdpr_info.data_category if gdpr_info else None,
+                    "gdpr_rights_invoked": gdpr_info.gdpr_rights_invoked if gdpr_info else [],
+                    "retention_period": gdpr_info.retention_period if gdpr_info else None,
+                    "requires_human_review": requires_compliance_review
                 },
                 "alerts": alerts if alerts else None
             }
@@ -264,7 +315,9 @@ def search_documents(query: str, n_results: int = 5):
                         "document_id": results["ids"][i],
                         "text_preview": results["documents"][i][:200] + "...",
                         "metadata": results["metadatas"][i],
-                        "similarity": float(1 - results["distances"][i])
+                        "similarity": float(1 - results["distances"][i]),
+                        "legal_basis": results["metadatas"][i].get("legal_basis", "Unknown"),
+                        "requires_review": results["metadatas"][i].get("requires_human_review", False)
                     }
                     for i in range(len(results["ids"]))
                 ]
@@ -396,6 +449,76 @@ def peek(limit: int = 5, offset: int = 0, include_embeddings: bool = False):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/admin/model-rotation-status")
+def get_model_rotation_status():
+    """
+    Get current status of model rotation system
+    Shows which models are available, rate limited, and usage statistics
+    """
+    try:
+        status = llm_service.model_rotator.get_status()
+        status["current_model"] = llm_service.current_model
+        status["configured_models"] = settings.MISTRAL_FALLBACK_MODELS
+        return JSONResponse(
+            status_code=200,
+            content=status
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/reset-model-rotation")
+def reset_model_rotation():
+    """
+    Reset model rotation tracking (clears rate limits and usage stats)
+    Useful for manual intervention or testing
+    """
+    try:
+        llm_service.model_rotator.reset()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Model rotation service reset successfully",
+                "current_model": llm_service.current_model
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/ocr-model-rotation-status")
+def get_ocr_model_rotation_status():
+    """
+    Get current status of OCR model rotation system
+    Shows which OCR models are available, rate limited, and usage statistics
+    """
+    try:
+        status = ocr_service.ocr_model_rotator.get_status()
+        status["current_ocr_model"] = ocr_service.current_ocr_model
+        status["configured_ocr_models"] = settings.MISTRAL_OCR_FALLBACK_MODELS
+        return JSONResponse(
+            status_code=200,
+            content=status
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/reset-ocr-model-rotation")
+def reset_ocr_model_rotation():
+    """
+    Reset OCR model rotation tracking (clears rate limits and usage stats)
+    Useful for manual intervention or testing
+    """
+    try:
+        ocr_service.ocr_model_rotator.reset()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "OCR model rotation service reset successfully",
+                "current_ocr_model": ocr_service.current_ocr_model
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/admin/vector-stats")
 def vector_stats(sample: int = 50):
     """
@@ -441,15 +564,13 @@ def vector_stats(sample: int = 50):
 @app.get("/documents-by-category")
 def get_documents_by_category():
     """
-    Get all documents grouped by category
+    Get documents grouped by category
     """
     try:
-        # Get all documents from ChromaDB
         results = db_client.collection.get(
             include=["metadatas", "documents"]
         )
 
-        # Group by category
         documents_by_category = {}
         for i, doc_id in enumerate(results["ids"]):
             metadata = results["metadatas"][i]
@@ -460,10 +581,12 @@ def get_documents_by_category():
 
             documents_by_category[category].append({
                 "document_id": doc_id,
-                "filename": metadata.get("filename", "Unknown"),
+                "filename": metadata.get("filename", "Unbekannt"),
                 "customer_id": metadata.get("customer_id"),
                 "urgency": metadata.get("urgency"),
-                "processed_at": metadata.get("processed_at")
+                "processed_at": metadata.get("processed_at"),
+                "legal_basis": metadata.get("legal_basis"),
+                "requires_review": metadata.get("requires_human_review", False)
             })
 
         return JSONResponse(
@@ -475,10 +598,11 @@ def get_documents_by_category():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @app.post("/chat")
 async def chat_with_document(request: dict):
     """
-    Chat with LLM about documents - searches database for relevant context
+    Chat about documents with DSGVO awareness
     """
     try:
         query = request.get("query")
@@ -486,58 +610,39 @@ async def chat_with_document(request: dict):
         chat_history = request.get("chat_history", [])
 
         if not query:
-            raise HTTPException(status_code=400, detail="Query is required")
+            raise HTTPException(status_code=400, detail="Anfrage erforderlich")
 
-        # Get document context if document_id provided
         context = ""
         if document_id:
             doc = db_client.get_document_by_id(document_id)
             if doc:
-                context = f"Document Context:\n{doc['document']}\n\nMetadata: {doc['metadata']}\n\n"
+                context = f"Dokument-Kontext:\n{doc['document']}\n\nMetadaten: {doc['metadata']}\n\n"
         else:
-            # Search for relevant documents using semantic search
             try:
                 query_embedding = embedding_service.generate_embedding(query)
                 search_results = db_client.search_similar_documents(
                     query_embedding=query_embedding,
-                    n_results=3  # Get top 3 relevant documents
+                    n_results=3
                 )
 
                 if search_results["ids"]:
-                    context = "Relevant Documents from Database:\n\n"
+                    context = "Relevante Dokumente aus der Datenbank:\n\n"
                     for i in range(len(search_results["ids"])):
                         doc_id = search_results["ids"][i]
                         doc_text = search_results["documents"][i]
                         doc_meta = search_results["metadatas"][i]
                         similarity = 1 - search_results["distances"][i]
 
-                        context += f"Document {i+1} (ID: {doc_id}, Similarity: {similarity:.2f}):\n"
-                        context += f"Category: {doc_meta.get('category', 'N/A')}\n"
-                        context += f"Urgency: {doc_meta.get('urgency', 'N/A')}\n"
-                        context += f"Filename: {doc_meta.get('filename', 'N/A')}\n"
-                        context += f"Content Preview: {doc_text[:500]}...\n\n"
-
-                    # Get all documents if query is about listing/viewing all
-                    if any(keyword in query.lower() for keyword in ['all', 'list', 'show me', 'find all', 'get all']):
-                        all_docs = db_client.collection.get(include=["metadatas", "documents"])
-                        context += f"\n\nTotal Documents in Database: {len(all_docs['ids'])}\n"
-
-                        # Group by category for summary
-                        category_counts = {}
-                        for meta in all_docs["metadatas"]:
-                            cat = meta.get("category", "unknown")
-                            category_counts[cat] = category_counts.get(cat, 0) + 1
-
-                        context += "Documents by Category:\n"
-                        for cat, count in category_counts.items():
-                            context += f"- {cat}: {count} document(s)\n"
+                        context += f"Dokument {i+1} (ID: {doc_id}, Ähnlichkeit: {similarity:.2f}):\n"
+                        context += f"Kategorie: {doc_meta.get('category', 'N/A')}\n"
+                        context += f"Dringlichkeit: {doc_meta.get('urgency', 'N/A')}\n"
+                        context += f"Dateiname: {doc_meta.get('filename', 'N/A')}\n"
+                        context += f"Inhalt (Vorschau): {doc_text[:500]}...\n\n"
 
             except Exception as e:
-                print(f"Search error: {e}")
-                # Continue without search results
-                context = "Note: Unable to search database at this moment, providing general assistance.\n\n"
+                print(f"Suchfehler: {e}")
+                context = "Hinweis: Datenbanksuche momentan nicht verfügbar.\n\n"
 
-        # Use LLM service to generate response
         response = await llm_service.chat_with_context(query, context, chat_history)
 
         return JSONResponse(

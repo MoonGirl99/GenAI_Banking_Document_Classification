@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict
 from datetime import datetime
 from enum import Enum
@@ -24,6 +24,16 @@ class DocumentMetadata(BaseModel):
     subject: Optional[str] = None
     language: str = "de"
 
+class GDPRCompliance(BaseModel):
+    """GDPR compliance information"""
+    model_config = ConfigDict(extra='ignore')
+    legal_basis: Optional[str] = None
+    data_category: str = "normal"
+    gdpr_rights_invoked: List[str] = Field(default_factory=list)
+    retention_period: Optional[str] = None
+    requires_human_review: bool = False
+    flags: List[str] = Field(default_factory=list)
+
 class ProcessedDocument(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     raw_text: str
@@ -36,3 +46,4 @@ class ProcessedDocument(BaseModel):
     embedding: Optional[List[float]] = None
     assigned_department: str
     requires_immediate_attention: bool = False
+    gdpr_info: Optional[GDPRCompliance] = None  # CHANGE THIS LINE

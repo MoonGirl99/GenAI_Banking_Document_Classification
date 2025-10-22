@@ -1,156 +1,122 @@
 import time
-from mistralai import Mistral
+try:
+    from mistralai import Mistral
+except ImportError:
+    from mistralai.client import MistralClient as Mistral
 import json
+import logging
 from app.config import settings
-from app.models.document import DocumentCategory, UrgencyLevel, ProcessedDocument, DocumentMetadata
+from app.models.document import DocumentCategory, UrgencyLevel, ProcessedDocument, DocumentMetadata, GDPRCompliance
+from app.services.model_rotation_service import ModelRotationService
+from app.constants import SYSTEM_PROMPT_GERMAN_GDPR
 from langsmith import traceable
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
     def __init__(self):
         self.client = Mistral(api_key=settings.MISTRAL_API_KEY)
+        # Initialize model rotation service
+        self.model_rotator = ModelRotationService(settings.MISTRAL_FALLBACK_MODELS)
+        self.current_model = settings.MISTRAL_MODEL
+        self.system_prompt = SYSTEM_PROMPT_GERMAN_GDPR
 
     @traceable(name="classify_document", run_type="llm")
     async def classify_and_extract(self, text: str) -> ProcessedDocument:
         """
         Use Mistral LLM to classify document and extract key information
+        Automatically rotates through fallback models if rate limits are hit
         """
         prompt = self._create_classification_prompt(text)
-        max_retries = 3
+        max_model_attempts = len(settings.MISTRAL_FALLBACK_MODELS)
+        error_str = "Unknown error"  # Initialize to avoid reference before assignment
 
-        for attempt in range(max_retries):
-            try:
-                response = self.client.chat.complete(
-                    model=settings.MISTRAL_MODEL,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": self._get_system_prompt()
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    temperature=0.1,
-                    response_format={"type": "json_object"}
-                )
+        for model_attempt in range(max_model_attempts):
+            # Get next available model
+            if model_attempt == 0:
+                model_to_use = self.current_model
+            else:
+                model_to_use = self.model_rotator.get_next_available_model(self.current_model)
+                self.current_model = model_to_use
+                logger.info(f"Switching to fallback model: {model_to_use}")
 
-                # Parse the JSON response
-                result = json.loads(response.choices[0].message.content)
+            max_retries = 2  # Reduced retries per model since we have multiple models
 
-                # Create ProcessedDocument
-                processed_doc = ProcessedDocument(
-                    raw_text=text,
-                    category=DocumentCategory(result["category"]),
-                    urgency_level=UrgencyLevel(result["urgency"]),
-                    metadata=DocumentMetadata(**result["metadata"]),
-                    extracted_info=result["extracted_info"],
-                    confidence_score=result["confidence_score"],
-                    assigned_department=self._get_department(result["category"]),
-                    requires_immediate_attention=(result["urgency"] == "high")
-                )
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Attempting classification with model: {model_to_use} (attempt {attempt + 1}/{max_retries})")
 
-                return processed_doc
+                    response = self.client.chat.complete(
+                        model=model_to_use,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": self._get_system_prompt()
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
+                    )
 
-            except Exception as e:
-                if "429" in str(e) and attempt < max_retries - 1:
-                    wait = 2 ** attempt  # Exponential backoff
-                    print(f"Rate limited, waiting {wait}s...")
-                    time.sleep(wait)
-                else:
-                    raise Exception(f"LLM classification failed: {str(e)}")
-        else:
-            raise Exception("LLM classification failed after max retries")
+                    # Parse the JSON response
+                    result = json.loads(response.choices[0].message.content)
+
+                    # Create a ProcessedDocument with safe access to optional fields
+                    gdpr_data = result.get("gdpr_compliance", {})
+
+                    # Safely create GDPRCompliance object with defaults
+                    try:
+                        gdpr_info = GDPRCompliance(**gdpr_data) if gdpr_data else GDPRCompliance()
+                    except Exception as gdpr_error:
+                        logger.warning(f"Failed to parse GDPR data: {gdpr_error}, using defaults")
+                        gdpr_info = GDPRCompliance()
+
+                    processed_doc = ProcessedDocument(
+                        raw_text=text,
+                        category=DocumentCategory(result.get("category", "general_correspondence")),
+                        urgency_level=UrgencyLevel(result.get("urgency", "medium")),
+                        metadata=DocumentMetadata(**result.get("metadata", {})),
+                        extracted_info=result.get("extracted_info", {}),
+                        confidence_score=result.get("confidence_score", 0.5),
+                        assigned_department=self._get_department(result.get("category", "general_correspondence")),
+                        requires_immediate_attention=(result.get("urgency") == "high"),
+                        gdpr_info=gdpr_info
+                    )
+
+                    # Mark success
+                    self.model_rotator.mark_success(model_to_use)
+                    logger.info(f"Successfully classified document with model: {model_to_use}")
+
+                    return processed_doc
+
+                except Exception as e:
+                    error_str = str(e)
+
+                    # Check if it's a rate limit error
+                    if "429" in error_str or "rate_limit" in error_str.lower() or "quota" in error_str.lower():
+                        logger.warning(f"Rate limit hit for model {model_to_use}: {error_str}")
+                        self.model_rotator.mark_rate_limited(model_to_use)
+                        break  # Break retry loop and try next model
+
+                    # For other errors, retry with exponential backoff
+                    if attempt < max_retries - 1:
+                        wait = 2 ** attempt
+                        logger.warning(f"Error with {model_to_use}, retrying in {wait}s: {error_str}")
+                        time.sleep(wait)
+                    else:
+                        logger.error(f"Failed all retries for model {model_to_use}: {error_str}")
+                        break  # Try next model
+
+        # If we've exhausted all models
+        raise Exception(f"LLM classification failed after trying all available models. Last error: {error_str if 'error_str' in locals() else 'Unknown'}")
 
     def _get_system_prompt(self) -> str:
-        SYSTEM_PROMPT = """You are an AI assistant specialized in processing German banking documents.
-        Your task is to analyze documents and provide structured JSON output.
-
-        CATEGORY DEFINITIONS (choose exactly ONE):
-
-        1. **loan_applications** (Kreditanträge)
-           - Customer requests to borrow money (Kredit, Darlehen, Finanzierung)
-           - Mentions loan amount, term, or purpose (Autokredit, Immobilienkredit, Konsumentenkredit)
-           - Contains loan terms or conditions
-           - Examples: "Ich beantrage ein Darlehen von €50.000", "Kreditantrag für Fahrzeugkauf"
-
-        2. **account_inquiries** (Kontoanfragen)
-           - Questions about account status, services, or management
-           - Requests for account information, statements, or changes
-           - Account opening/closing requests
-           - Service inquiries (fees, interest rates, products)
-           - Examples: "Wie kann ich mein Konto auflösen?", "Warum sind die Gebühren gestiegen?"
-
-        3. **complaints** (Beschwerden)
-           - Customer expresses dissatisfaction or files complaint
-           - Reports problems with service, billing, or advice
-           - Demands resolution or compensation
-           - Keywords: beschwerde, reklamation, unzufrieden, fehlgeschlagen, falsche Beratung, nicht zufrieden
-           - Examples: "Ich beschwere mich über...", "Dies ist inakzeptabel", "Ich fordere Entschädigung"
-
-        4. **kyc_updates** (KYC/Legitimation Updates)
-           - Customer provides/updates identification or personal information
-           - Compliance-driven information requests from bank
-           - Know Your Customer (KYC) verification processes
-           - Keywords: Legitimation, Verifizierung, DSGVO, Identifikation, Überprüfung, Datenaktualisierung
-           - Examples: "Hier sind meine aktualisierten Daten", "Adressänderung mitteilen"
-
-        5. **general_correspondence** (Allgemeine Korrespondenz)
-           - Does NOT fit above categories
-           - General inquiries, routine questions, information requests
-           - Administrative matters (address changes, password reset, notifications)
-           - Casual communication or feedback
-           - Examples: "Wie kann ich...?", "Ich hätte eine Frage zu...", "Können Sie mir erklären...?"
-           - **DEFAULT: If unsure, classify as general_correspondence with lower confidence**
-
-        CLASSIFICATION RULES:
-        - Read entire document carefully before classifying
-        - Look for primary purpose/intent (main reason customer contacted)
-        - If multiple categories apply: rank by PRIMARY intent
-        - If document is ambiguous: use keywords as tiebreaker
-        - If still unclear: classify as general_correspondence with confidence 0.6-0.75
-
-        URGENCY LEVELS:
-        - HIGH: "sofort", "dringend", "eilig", "schnellstmöglich", "umgehend" | Complaints | Fraud indicators
-        - MEDIUM: Time-sensitive requests, KYC deadlines, significant issues
-        - LOW: General inquiries, routine requests, no time pressure
-
-        EXTRACTION REQUIREMENTS:
-        - Customer ID: Look for "Kundennummer", "KD-", "Kunde Nr"
-        - Account: "Kontonummer", "Konto-Nr", IBAN pattern, account numbers
-        - Contact: Email patterns, phone numbers with +49 or 0
-        - Subject: First sentence or document title (max 100 chars)
-
-        OUTPUT FORMAT (VALID JSON ONLY):
-        {
-            "category": "string (one of: loan_applications, account_inquiries, complaints, kyc_updates, general_correspondence)",
-            "urgency": "string (high, medium, low)",
-            "metadata": {
-                "customer_id": "string or null",
-                "account_number": "string or null",
-                "email": "string or null",
-                "phone": "string or null",
-                "subject": "string or null"
-            },
-            "extracted_info": {
-                "required_action": "string describing what customer wants",
-                "key_points": ["list", "of", "main", "points"],
-                "mentioned_amounts": "string or null (e.g., '€50.000')",
-                "reference_numbers": ["list of transaction IDs, complaint refs"]
-            },
-            "confidence_score": "float between 0.0 and 1.0"
-        }
-
-        CONFIDENCE SCORING GUIDE:
-        - 0.95-1.0: Clear category match, strong keywords, complete info
-        - 0.80-0.94: Good match, clear intent, minor ambiguity
-        - 0.65-0.79: Reasonable match, some ambiguity, lower confidence acceptable
-        - 0.50-0.64: Weak match, significant ambiguity (consider general_correspondence)
-        - <0.50: Too ambiguous (flag for human review)
-
-        Return ONLY the JSON object, NO additional text."""
-        return SYSTEM_PROMPT
+        return SYSTEM_PROMPT_GERMAN_GDPR
 
     def _create_classification_prompt(self, text: str) -> str:
         return f"""Analyze this banking document and classify it according to the instructions:
@@ -170,120 +136,90 @@ class LLMService:
         """
         if chat_history is None:
             chat_history = []
-            CHAT_SYSTEM_PROMPT = """You are a specialized AI assistant for German banking document classification and support.
 
-            PRIMARY ROLE:
-            - Answer user questions about documents in the system
-            - Explain document classifications and extraction results
-            - Provide banking procedure guidance (German banking context)
-            - Assist with document searches and analysis
+        # Define system prompt in German
+        CHAT_SYSTEM_PROMPT = """Du bist ein spezialisierter KI-Assistent für deutsche Bankdokumentenklassifizierung und -unterstützung.
 
-            CONTEXT USAGE:
-            - When document context is provided: prioritize it for accurate answers
-            - Reference specific extracted data (customer ID, amount, urgency level)
-            - Relate answers to the actual document content, not generic banking knowledge
+HAUPTAUFGABE:
+- Beantworte Benutzerfragen zu Dokumenten im System
+- Erkläre Dokumentklassifizierungen und Extraktionsergebnisse
+- Biete Anleitung zu Bankverfahren (deutscher Bankkontext)
+- Unterstütze bei Dokumentensuchen und -analysen
 
-            RESPONSE GUIDELINES:
-            - Be concise and direct (1-3 sentences for simple questions)
-            - Use professional German banking terminology
-            - Provide specific data from documents when available
-            - Avoid unnecessary explanations unless asked for detail
+WICHTIG: Antworte IMMER auf Deutsch, auch wenn die Frage auf Englisch gestellt wird.
 
-            KNOWLEDGE DOMAINS:
+KONTEXTNUTZUNG:
+- Wenn Dokumentkontext bereitgestellt wird: priorisiere ihn für genaue Antworten
+- Beziehe dich auf spezifische extrahierte Daten (Kundennummer, Betrag, Dringlichkeitsstufe)
+- Verknüpfe Antworten mit dem tatsächlichen Dokumentinhalt, nicht mit allgemeinem Bankwissen
 
-            1. **Document Classification** (explain results)
-               - Why document was categorized as [category]
-               - What keywords triggered classification
-               - Confidence score meaning
-               - Alternative categories that were considered
+ANTWORTRICHTLINIEN:
+- Sei prägnant und direkt (1-3 Sätze für einfache Fragen)
+- Verwende professionelle deutsche Bankterminologie
+- Liefere spezifische Daten aus Dokumenten, wenn verfügbar
+- Vermeide unnötige Erklärungen, es sei denn, nach Details gefragt
 
-            2. **Banking Procedures** (German context)
-               - KYC/Legitimation requirements (DSGVO compliance)
-               - Loan application processes and timelines
-               - Account management procedures
-               - Complaint handling procedures (Reklamationen)
-               - Urgency levels and escalation paths
+WISSENSBEREICHE:
 
-            3. **Document Analysis** (technical)
-               - Extracted information (customer ID, amounts, dates)
-               - Missing or incomplete data
-               - Data quality and confidence scores
-               - Similar documents in database (semantic search)
+1. **Dokumentklassifizierung** (Ergebnisse erklären)
+   - Warum wurde das Dokument als [Kategorie] eingestuft
+   - Welche Schlüsselwörter lösten die Klassifizierung aus
+   - Bedeutung des Vertrauenswerts
+   - Alternative Kategorien, die in Betracht gezogen wurden
 
-            4. **System Capabilities** (operational)
-               - What information can be extracted
-               - Processing time and latency
-               - Search functionality
-               - When documents require human review
+2. **Bankverfahren** (deutscher Kontext)
+   - KYC/Legitimationsanforderungen (DSGVO-Konformität)
+   - Kreditantragsprozesse und Zeitpläne
+   - Kontoverwaltungsverfahren
+   - Beschwerdeverfahren (Reklamationen)
+   - Dringlichkeitsstufen und Eskalationswege
 
-            QUESTION HANDLING:
+3. **Dokumentanalyse** (technisch)
+   - Extrahierte Informationen (Kundennummer, Beträge, Daten)
+   - Fehlende oder unvollständige Daten
+   - Datenqualität und Vertrauenswerte
+   - Ähnliche Dokumente in der Datenbank (semantische Suche)
 
-            Q: "Warum wurde dieses Dokument als Beschwerde klassifiziert?"
-            A: "Keywords 'beschwerde' + 'sofort' + 'Entschädigung' triggered complaint classification (98% confidence). Customer demands resolution, indicating formal complaint vs. inquiry."
+4. **Systemfähigkeiten** (betrieblich)
+   - Welche Informationen extrahiert werden können
+   - Verarbeitungszeit und Latenz
+   - Suchfunktionalität
+   - Wann Dokumente menschliche Überprüfung erfordern
 
-            Q: "Was ist KYC?"
-            A: "KYC (Know Your Customer) = Legitimationsprüfung per DSGVO. Bank requires current customer ID, address, income verification for regulatory compliance."
+FRAGENBEHANDLUNG:
 
-            Q: "Wie lange dauert Kreditbearbeitung?"
-            A: "Standard: 5-7 business days for loan applications. Depends on completeness of documents. Urgent cases (expedited) can be processed in 2-3 days."
+F: "Warum wurde dieses Dokument als Beschwerde klassifiziert?"
+A: "Schlüsselwörter 'beschwerde' + 'sofort' + 'Entschädigung' lösten Beschwerdeklassifizierung aus (98% Vertrauen). Kunde fordert Lösung, was auf formelle Beschwerde vs. Anfrage hinweist."
 
-            Q: "Finde alle Beschwerden von letzter Woche"
-            A: "Found 12 complaints (last 7 days). Showing top 5 by urgency: [High priority list]. Would you like details on specific complaints?"
+F: "Was ist KYC?"
+A: "KYC (Know Your Customer) = Legitimationsprüfung per DSGVO. Bank benötigt aktuelle Kundennummer, Adresse, Einkommensnachweis für regulatorische Konformität."
 
-            DOCUMENT-SPECIFIC QUESTIONS:
+F: "Wie lange dauert Kreditbearbeitung?"
+A: "Standard: 5-7 Werktage für Kreditanträge. Abhängig von Vollständigkeit der Dokumente. Dringende Fälle können in 2-3 Tagen bearbeitet werden."
 
-            When document provided, answer in format:
-            - **Classification**: [category] (confidence: X%)
-            - **Why**: [key reasons with keywords/amounts]
-            - **Action Required**: [what system/bank needs to do]
-            - **Next Steps**: [timeline, department, escalation if needed]
+F: "Finde alle Beschwerden von letzter Woche"
+A: "12 Beschwerden gefunden (letzte 7 Tage). Zeige Top 5 nach Dringlichkeit: [High-Priority-Liste]. Möchten Sie Details zu bestimmten Beschwerden?"
 
-            GERMAN BANKING CONTEXT (accuracy critical):
+TON:
+- Professionell und hilfsbereit
+- Direkt (keine unnötige Einleitung)
+- Bankangemessene Sprache
+- Deutsche Begriffe durchgehend
 
-            **Categories & Routing:**
-            - Loans (Kredite) → loans@bank.de
-            - Accounts (Konten) → accounts@bank.de
-            - Complaints (Beschwerden) → complaints@bank.de
-            - KYC → compliance@bank.de
-            - General → info@bank.de
+EINSCHRÄNKUNGEN:
+- Kann Genauigkeit ohne vollständigen Dokumentkontext nicht garantieren
+- Rechtsfragen an Compliance-Team weiterleiten
+- Kann Klassifizierung nicht überschreiben (manuelle Überprüfung bei niedrigem Vertrauen empfehlen)
+- Kann nicht auf Echtzeitkontoinformationen zugreifen
 
-            **Urgency Triggers (German):**
-            - HIGH: "sofort", "dringend", "eilig", "schnellstmöglich", "Beschwerde", "Betrug"
-            - MEDIUM: KYC deadlines, significant issues, "bald"
-            - LOW: General inquiries, routine requests
+WANN ESKALIEREN:
+- Betrugshinweise → HIGH-Priorität markieren
+- Rechtliche Drohungen → an Rechtsabteilung weiterleiten
+- DSGVO-Verstöße → Compliance-Team
+- Systemfehler → Admin-Team
 
-            **Compliance Terms:**
-            - DSGVO = GDPR (EU data protection)
-            - Legitimation = Customer verification/KYC
-            - Reklamation = Formal complaint
-            - Betrug = Fraud
-
-            TONE:
-            - Professional and helpful
-            - Direct (no unnecessary preamble)
-            - Banking-appropriate language
-            - German terms where relevant
-
-            LIMITATIONS:
-            - Cannot guarantee accuracy without full document context
-            - Defer legal questions to compliance team
-            - Cannot override classification (recommend manual review for low confidence)
-            - Cannot access real-time account information
-
-            WHEN TO ESCALATE:
-            - Fraud indicators → flag HIGH priority
-            - Legal threats → refer to legal team
-            - GDPR violations → compliance team
-            - System errors → admin team
-
-            OUTPUT EXAMPLES:
-
-            Short Answer: "Ja, die Darlehensanfrage wurde automatisch erkannt (95% confidence) weil Kundennummer, Betrag (€50.000) und Laufzeit (60 Monate) extrahiert wurden."
-
-            Long Answer: (if user asks for detail) "Die Klassifizierung als 'Kreditantrag' basiert auf: (1) Keywords 'Darlehen' + 'Kreditantrag'; (2) Extrahierte Daten: Betrag, Laufzeit, Fahrzeugzweck; (3) Vergleich mit ähnlichen Dokumenten (99% Match). Department: loans@bank.de, Bearbeitungszeit: 5-7 Tage."
-
-            Return ONLY concise, accurate responses. If document context missing, state clearly: "Für präzise Antwort bitte Dokument-ID oder Inhalt bereitstellen."
-            """
+Gib NUR prägnante, genaue Antworten auf Deutsch zurück. Wenn Dokumentkontext fehlt, sage klar: "Für präzise Antwort bitte Dokument-ID oder Inhalt bereitstellen."
+"""
 
         # Build messages with context
         messages = [
@@ -297,7 +233,7 @@ class LLMService:
         if context:
             messages.append({
                 "role": "system",
-                "content": f"Here is the document context you should reference:\n\n{context}"
+                "content": f"Hier ist der Dokumentkontext, auf den du dich beziehen solltest:\n\n{context}"
             })
 
         # Add chat history
@@ -315,7 +251,7 @@ class LLMService:
 
         try:
             response = self.client.chat.complete(
-                model=settings.MISTRAL_MODEL,
+                model=self.current_model,
                 messages=messages,
                 temperature=0.7,
                 max_tokens=1000

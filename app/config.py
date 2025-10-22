@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Dict
+from typing import Dict, List
 
 
 class Settings(BaseSettings):
@@ -8,6 +8,22 @@ class Settings(BaseSettings):
     MISTRAL_MODEL: str = "mistral-medium-2508"
     MISTRAL_EMBEDDING_MODEL: str = "mistral-embed"
     MISTRAL_OCR_MODEL: str = "mistral-ocr-2505"
+
+    # Fallback models list for automatic rotation when rate limits are hit
+    MISTRAL_FALLBACK_MODELS: List[str] = [
+        "mistral-small-latest",
+        "mistral-large-latest",
+        "mistral-medium-latest",
+        "mistral-medium-2508",
+        "magistral-medium-2509",
+        "ministral-3b-2410"
+    ]
+
+    # OCR models fallback list
+    MISTRAL_OCR_FALLBACK_MODELS: List[str] = [
+        "mistral-ocr-2505",
+        "mistral-ocr-latest"
+    ]
 
     # ChromaDB Configuration
     CHROMA_HOST: str = "localhost"

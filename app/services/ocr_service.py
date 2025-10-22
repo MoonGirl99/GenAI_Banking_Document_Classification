@@ -1,9 +1,16 @@
 import base64
 import re
+import logging
 from typing import Union, Dict, List, Optional
 from dataclasses import dataclass
-from mistralai import Mistral
+try:
+    from mistralai import Mistral
+except ImportError:
+    from mistralai.client import MistralClient as Mistral
 from app.config import settings
+from app.services.model_rotation_service import ModelRotationService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -25,7 +32,9 @@ class MistralOCRService:
 
     def __init__(self):
         self.client = Mistral(api_key=settings.MISTRAL_API_KEY)
-        self.model = "mistral-ocr-2505"
+        # Initialize model rotation service for OCR
+        self.ocr_model_rotator = ModelRotationService(settings.MISTRAL_OCR_FALLBACK_MODELS)
+        self.current_ocr_model = settings.MISTRAL_OCR_MODEL
 
     def process_document(
             self,
@@ -35,7 +44,7 @@ class MistralOCRService:
             pages: Optional[List[int]] = None
     ) -> DocumentStructure:
         """
-        Process document using Mistral OCR API
+        Process document using Mistral OCR API with automatic model fallback
 
         Args:
             document: Document bytes or base64 string
@@ -74,24 +83,68 @@ class MistralOCRService:
             mime_type = self._get_mime_type(document_type)
             document_url = f"data:{mime_type};base64,{document_b64}"
 
-            # Call Mistral OCR API using the client
-            ocr_response = self.client.ocr.process(
-                model=self.model,
-                document={
-                    "type": "document_url",
-                    "document_url": document_url
-                },
-                include_image_base64=include_images,
-                pages=pages
-            )
+            # Try OCR with fallback models
+            max_model_attempts = len(settings.MISTRAL_OCR_FALLBACK_MODELS)
 
-            # Parse the response
-            document_structure = self._parse_ocr_response(ocr_response)
+            for model_attempt in range(max_model_attempts):
+                # Get next available OCR model
+                if model_attempt == 0:
+                    model_to_use = self.current_ocr_model
+                else:
+                    model_to_use = self.ocr_model_rotator.get_next_available_model(self.current_ocr_model)
+                    self.current_ocr_model = model_to_use
+                    logger.info(f"Switching to fallback OCR model: {model_to_use}")
 
-            # Enhance with banking-specific context
-            document_structure = self._enhance_banking_context(document_structure)
+                max_retries = 2
 
-            return document_structure
+                for attempt in range(max_retries):
+                    try:
+                        logger.info(f"Attempting OCR with model: {model_to_use} (attempt {attempt + 1}/{max_retries})")
+
+                        # Call Mistral OCR API using the client
+                        ocr_response = self.client.ocr.process(
+                            model=model_to_use,
+                            document={
+                                "type": "document_url",
+                                "document_url": document_url
+                            },
+                            include_image_base64=include_images,
+                            pages=pages
+                        )
+
+                        # Parse the response
+                        document_structure = self._parse_ocr_response(ocr_response)
+
+                        # Enhance with banking-specific context
+                        document_structure = self._enhance_banking_context(document_structure)
+
+                        # Mark success
+                        self.ocr_model_rotator.mark_success(model_to_use)
+                        logger.info(f"Successfully processed document with OCR model: {model_to_use}")
+
+                        return document_structure
+
+                    except Exception as e:
+                        error_str = str(e)
+
+                        # Check if it's a rate limit error
+                        if "429" in error_str or "rate_limit" in error_str.lower() or "quota" in error_str.lower():
+                            logger.warning(f"Rate limit hit for OCR model {model_to_use}: {error_str}")
+                            self.ocr_model_rotator.mark_rate_limited(model_to_use)
+                            break  # Break retry loop and try next model
+
+                        # For other errors, retry with exponential backoff
+                        if attempt < max_retries - 1:
+                            import time
+                            wait = 2 ** attempt
+                            logger.warning(f"Error with OCR model {model_to_use}, retrying in {wait}s: {error_str}")
+                            time.sleep(wait)
+                        else:
+                            logger.error(f"Failed all retries for OCR model {model_to_use}: {error_str}")
+                            break  # Try next model
+
+            # If we've exhausted all OCR models
+            raise Exception(f"Mistral OCR API error: Failed after trying all available OCR models. Last error: {error_str if 'error_str' in locals() else 'Unknown'}")
 
         except Exception as e:
             raise Exception(f"Mistral OCR API error: {str(e)}")
