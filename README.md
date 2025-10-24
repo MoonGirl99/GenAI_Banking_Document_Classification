@@ -241,8 +241,8 @@ file: <document file>
     "customer_id": "KD-123456789",
     "account_number": "DE89370400440532013000"
   },
-  "extracted_info": {...},
-  "routing": {...}
+  "extracted_info": {},
+  "routing": {}
 }
 ```
 
@@ -527,7 +527,4 @@ This project is proprietary software. All rights reserved.
 - **Docker** for containerization
 
 
----
-
-**Built with ❤️ for German Banking Innovation**
 
