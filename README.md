@@ -210,8 +210,6 @@ GenAI_Document_Classification/
 │   ├── test_*.py               # Comprehensive test suite (100+ tests)
 │   ├── conftest.py             # Pytest configuration
 │   └── run_tests.sh            # Test runner script
-├── docs/                       # Documentation PDFs
-├── MD files/                   # Additional documentation
 ├── docker-compose.yaml         # Docker orchestration
 ├── Dockerfile                  # Application container
 ├── requirements.txt            # Python dependencies
