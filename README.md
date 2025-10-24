@@ -159,12 +159,6 @@ echo "MISTRAL_API_KEY=your_api_key_here" > .env
 ./run.sh
 ```
 
-The script will:
-- ✅ Validate your environment setup
-- ✅ Check Docker status
-- ✅ Build and start all services
-- ✅ Open the web UI in your browser
-
 ### Alternative: Manual Start
 
 ```bash
@@ -413,22 +407,6 @@ pytest
 # With coverage report
 pytest --cov=app --cov-report=html --cov-report=term
 ```
-
-### Test Coverage
-
-The project includes **100+ comprehensive tests** covering:
-
-- ✅ **Models**: Data validation, enums, schemas
-- ✅ **Services**: OCR, LLM, embeddings, routing
-- ✅ **Database**: ChromaDB operations, search, metadata
-- ✅ **API**: All endpoints, file uploads, error handling
-- ✅ **Integration**: End-to-end workflows
-- ✅ **Configuration**: Settings validation
-
-**Coverage**: 85-95% across all components
-
-### Test Categories
-
 ```bash
 # Run specific test categories
 pytest -m unit          # Unit tests only
@@ -440,13 +418,6 @@ pytest tests/test_api.py
 pytest tests/test_llm_service.py
 ```
 
-### View Coverage Report
-
-After running tests with coverage:
-
-```bash
-open htmlcov/index.html
-```
 
 ## 🐳 Deployment
 
@@ -473,46 +444,12 @@ services:
       - chroma_data:/chroma/chroma
 ```
 
-### Production Considerations
-
-1. **Security**
-   - Use secrets management for API keys
-   - Enable HTTPS/TLS
-   - Implement authentication & authorization
-   - Configure CORS appropriately
-
-2. **Scalability**
-   - Use container orchestration (Kubernetes, ECS)
-   - Implement load balancing
-   - Scale ChromaDB horizontally
-   - Add caching layer (Redis)
-
-3. **Monitoring**
-   - Enable LangSmith tracing
-   - Set up application logging
-   - Monitor API rate limits
-   - Track performance metrics
-
-4. **Data Persistence**
-   - Regular database backups
-   - Volume persistence for ChromaDB
-   - Document archival strategy
-
 ### Cloud Deployment
 
 The project includes cloud-ready configurations:
 
 - `docker-composer-cloud-service.yaml`: Cloud service configuration
 - `app/main-chromadb-cloud.py`: Cloud ChromaDB integration
-
-## 📖 Documentation
-
-Additional documentation available in the `MD files/` directory:
-
-- **FEATURE_IMPLEMENTATION.md**: Detailed feature descriptions
-- **TESTING_GUIDE.md**: Comprehensive testing guide
-- **CHROMADB_INSPECTION_GUIDE.md**: Database inspection tools
-- **HOW_TO_RUN.md**: Quick start guide
 
 ## 🔒 GDPR/DSGVO Compliance
 
@@ -582,7 +519,7 @@ This project is proprietary software. All rights reserved.
 
 ## 👥 Authors
 
-- **Mahshid** - Initial development
+- **Mahshid Ahmadi** -
 
 ## 🙏 Acknowledgments
 
@@ -591,12 +528,6 @@ This project is proprietary software. All rights reserved.
 - **FastAPI** for excellent API framework
 - **Docker** for containerization
 
-## 📞 Support
-
-For issues, questions, or contributions:
-- Create an issue in the repository
-- Review existing documentation in `MD files/`
-- Check the API documentation at `/docs`
 
 ---
 
